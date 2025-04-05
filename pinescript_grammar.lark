@@ -1,0 +1,75 @@
+// Lark Grammar for a subset of PineScript
+
+// Start rule: Zero or more statements separated/ended by newlines
+// Allows leading/trailing blank lines.
+?start: _NL* (statement _NL*)*
+
+// Statement: An assignment or expression statement. Crucially, NO trailing newline here.
+?statement: assignment
+          | expression_statement
+
+// Assignment: Ends right after the expression
+assignment: IDENTIFIER _WS* "=" _WS* expression -> assign_var
+
+// Expression Statement: Just the expression itself
+expression_statement: expression -> expr_stmt
+
+// Expression hierarchy
+?expression: ternary
+?ternary: logical_or (_WS* "?" _WS* expression _WS* ":" _WS* expression)?
+?logical_or: logical_and ( _WS* LOGICAL_OR _WS* logical_and )*
+?logical_and: comparison ( _WS* LOGICAL_AND _WS* comparison )*
+?comparison: additive ( _WS* COMPARE_OP _WS* additive )*
+?additive: multiplicative ( _WS* ADD_OP _WS* multiplicative )*
+?multiplicative: term ( _WS* MUL_OP _WS* term )*
+
+// Term: A base value potentially followed by chaining operations
+?term: atom (chain_op)*
+
+// Chain operations allowed after an atom
+chain_op: "." IDENTIFIER         -> attribute_access_op
+          | "[" expression "]"     -> historical_access_op
+          | "(" [arguments] ")"    -> function_call_op
+
+// Atom: The absolute base units or a parenthesized expression
+?atom: NUMBER             -> number_literal
+     | ESCAPED_STRING     -> string_literal
+     | IDENTIFIER         -> variable_access
+     | "true"             -> literal_true   // Explicit keyword "true"
+     | "false"            -> literal_false  // Explicit keyword "false"
+     | "(" expression ")" -> parenthesized_expression
+
+// Function call arguments
+arguments: expression ("," expression)* ("," named_argument)*
+         | named_argument ("," named_argument)*
+
+named_argument: IDENTIFIER _WS* "=" _WS* expression
+
+// --- Terminals ---
+COMMENT: /\/\/[^\n]*/ // Define comment terminal
+
+// Define operators with precedence (higher first)
+COMPARE_OP: ">=" | "<=" | "==" | "!=" | ">" | "<"
+ADD_OP: "+" | "-"
+MUL_OP: "*" | "/" | "%"
+
+// -- Added logical operator terminals --
+LOGICAL_AND: "and"
+LOGICAL_OR: "or"
+// -- End additions --
+
+// --- Add Priorities ---
+NUMBER: SIGNED_NUMBER
+IDENTIFIER.1: /[a-zA-Z_][a-zA-Z0-9_]*/ // Assign lower priority (e.g., 1)
+// --- End Priorities ---
+
+ESCAPED_STRING : /'[^']*'/
+
+%import common.SIGNED_NUMBER
+%import common.SIGNED_INT
+%import common.WS_INLINE -> _WS // Inline whitespace ONLY
+%import common.NEWLINE -> _NL // Newlines are now significant tokens
+
+// Ignore ONLY inline whitespace and comments (for now)
+%ignore _WS
+%ignore COMMENT 
