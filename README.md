@@ -2,5 +2,8 @@
 Pine Script to Pine TS Transpiler
 
 ## First attempt at direct transpilation of Pine Script to Pine TS accepted JS
-## `pip install escodegen lark lark-parser`
-##  `python pine_to_pinets.py`
+Uses Lark transformer and some preprocessing hacks to support nested for loop/ ifs
+
+## Usage:
+ `pip install escodegen lark lark-parser`
+ `python transpile.py`

@@ -1,75 +1,142 @@
-// Lark Grammar for a subset of PineScript
+// Lark Grammar for a subset of PineScript (Explicit Block End Markers)
 
-// Start rule: Zero or more statements separated/ended by newlines
-// Allows leading/trailing blank lines.
-?start: _NL* (statement _NL*)*
+// --- Imports ---
+%import common.WS -> _WS
+%import common.CNAME -> IDENTIFIER
+%import common.SIGNED_NUMBER -> NUMBER
+%import common.ESCAPED_STRING -> STRING
+%import common.NEWLINE -> _NL
+// --- End Imports ---
 
-// Statement: An assignment or expression statement. Crucially, NO trailing newline here.
-?statement: assignment
+// Start rule points to program
+?start: program
+
+// Program: Zero or more newline-terminated statements, allowing optional final statement without NL
+?program: (statement_nl)* [statement]
+
+// Statement terminated by newline
+?statement_nl: statement _NL
+
+// Statement: Defines the different types of statements.
+// Order matters
+?statement: func_def_expr
+          | func_def_block
+          | simple_assignment
+          | destructuring_assignment
+          | reassignment_statement
+          | if_statement
+          | for_statement // Combined rule, optional step handled by logic/presence of STEP token
           | expression_statement
 
-// Assignment: Ends right after the expression
-assignment: IDENTIFIER _WS* "=" _WS* expression -> assign_var
+// --- Statement Rules ---
+
+// Assignment Rule: Can be simple or destructuring
+simple_assignment: IDENTIFIER _WS* ASSIGN_OP _WS* expression
+destructuring_assignment: LBRACK identifier_list RBRACK _WS* ASSIGN_OP _WS* expression
+identifier_list: IDENTIFIER (COMMA IDENTIFIER)*
+reassignment_statement: IDENTIFIER _WS* REASSIGN _WS* expression
+
+// If Statement (Requires ENDIF)
+if_statement: IF expression if_clause (ELSE IF expression if_clause)* [ELSE else_clause] ENDIF
+if_clause: _NL statement_nl+
+else_clause: _NL statement_nl+
+
+// If Expression (Ternary Equivalent - Requires ENDIF)
+if_expression: IF expression expression_clause (ELSE IF expression expression_clause)* [ELSE expression_clause] ENDIF -> if_expr
+expression_clause: _NL statement_nl+ // Body that should evaluate to the last expression
+
+// For Statement (Requires ENDFOR)
+// Using 'expression' for start value now
+for_statement: FOR IDENTIFIER ASSIGN_OP expression TO expression (STEP expression)? _NL statement_nl+ ENDFOR -> for_stmt
+
+// Function Definition (Block Body - Requires ENDFUNCTION)
+func_def_block: IDENTIFIER LPAR [param_list] RPAR _WS* ARROW _NL statement_nl+ ENDFUNCTION
+
+// Function Definition (Single Expression Body - Now requires ENDFUNCTION)
+func_def_expr: IDENTIFIER LPAR [param_list] RPAR _WS* ARROW expression ENDFUNCTION -> function_def_expr
 
 // Expression Statement: Just the expression itself
-expression_statement: expression -> expr_stmt
+expression_statement: expression
 
-// Expression hierarchy
+// --- Parameters ---
+?param_list: param (COMMA param)*
+param: IDENTIFIER -> simple_param
+     | IDENTIFIER _WS* ASSIGN_OP _WS* expression -> default_param // Use ASSIGN_OP
+
+// --- Expression Hierarchy ---
 ?expression: ternary
 ?ternary: logical_or (_WS* "?" _WS* expression _WS* ":" _WS* expression)?
 ?logical_or: logical_and ( _WS* LOGICAL_OR _WS* logical_and )*
 ?logical_and: comparison ( _WS* LOGICAL_AND _WS* comparison )*
 ?comparison: additive ( _WS* COMPARE_OP _WS* additive )*
 ?additive: multiplicative ( _WS* ADD_OP _WS* multiplicative )*
-?multiplicative: term ( _WS* MUL_OP _WS* term )*
-
-// Term: A base value potentially followed by chaining operations
+?multiplicative: unary_expr ( _WS* MUL_OP _WS* unary_expr )*
+?unary_expr: ADD_OP term | term
 ?term: atom (chain_op)*
-
-// Chain operations allowed after an atom
 chain_op: "." IDENTIFIER         -> attribute_access_op
           | "[" expression "]"     -> historical_access_op
           | "(" [arguments] ")"    -> function_call_op
-
-// Atom: The absolute base units or a parenthesized expression
-?atom: NUMBER             -> number_literal
-     | ESCAPED_STRING     -> string_literal
-     | IDENTIFIER         -> variable_access
-     | "true"             -> literal_true   // Explicit keyword "true"
-     | "false"            -> literal_false  // Explicit keyword "false"
-     | "(" expression ")" -> parenthesized_expression
-
-// Function call arguments
-arguments: expression ("," expression)* ("," named_argument)*
-         | named_argument ("," named_argument)*
-
-named_argument: IDENTIFIER _WS* "=" _WS* expression
+?atom: number_terminal | ESCAPED_STRING -> string_literal | IDENTIFIER -> variable_access | "true" -> literal_true | "false" -> literal_false | "[" [array_elements] "]" -> array_literal | "(" expression ")" -> parenthesized_expression | if_expression
+number_terminal: NUMBER -> number_literal
+?array_elements: expression (COMMA expression)*
+arguments: expression (COMMA expression)* ("," named_argument)*
+         | named_argument (COMMA named_argument)*
+named_argument: IDENTIFIER _WS* ASSIGN_OP _WS* expression
 
 // --- Terminals ---
-COMMENT: /\/\/[^\n]*/ // Define comment terminal
-
-// Define operators with precedence (higher first)
-COMPARE_OP: ">=" | "<=" | "==" | "!=" | ">" | "<"
+LPAR: "("
+RPAR: ")"
+LBRACK: "["
+RBRACK: "]"
+COMMA: ","
+DOT: "."
+QMARK: "?"
+COLON: ":"
+ASSIGN_OP: "=" // Consolidated
+REASSIGN: ":="
 ADD_OP: "+" | "-"
 MUL_OP: "*" | "/" | "%"
-
-// -- Added logical operator terminals --
+COMPARE_OP: "==" | "!=" | "<=" | ">=" | "<" | ">"
 LOGICAL_AND: "and"
 LOGICAL_OR: "or"
-// -- End additions --
+LOGICAL_NOT: "not"
+ARROW: "=>"
+TRUE: "true"
+FALSE: "false"
+NA: "na"
+IF: "if"
+ELSE: "else"
+FOR: "for"
+TO: "to"
+STEP: "step"
+PLOT: "plot"
 
-// --- Add Priorities ---
-NUMBER: SIGNED_NUMBER
-IDENTIFIER.1: /[a-zA-Z_][a-zA-Z0-9_]*/ // Assign lower priority (e.g., 1)
-// --- End Priorities ---
+// Explicit End Markers
+ENDFOR: "endfor"
+ENDIF: "endif"
+ENDFUNCTION: "endfunction"
 
-ESCAPED_STRING : /'[^']*'/
+COMMENT: /\/\/[^\n]*/
+ESCAPED_STRING : /'[^']*'|"[^"]*"/
 
-%import common.SIGNED_NUMBER
-%import common.SIGNED_INT
-%import common.WS_INLINE -> _WS // Inline whitespace ONLY
-%import common.NEWLINE -> _NL // Newlines are now significant tokens
-
-// Ignore ONLY inline whitespace and comments (for now)
+// --- Ignores ---
+%ignore COMMENT
 %ignore _WS
-%ignore COMMENT 
+
+// Ensure the file ends cleanly after the %ignore directives 
+
+// REMOVED separate NUMBER definition
+// REMOVED erroneous line: NUMBER: common.NUMBER 
+
+// REMOVED duplicate terminals section
+// // --- New Terminals ---
+// FOR.4: "for"
+// TO.4: "to"
+// STEP.4: "step" 
+
+
+
+// REMOVED Clause definitions
+// // --- If Statement ---
+// if_clause: _NL statement_nl+ // Body of if/else if
+// else_clause: _NL statement_nl+ // Body of else 
